@@ -1,26 +1,28 @@
-# Use a lightweight Python image
-FROM python:3.9-slim
+# Use official Python image as the base image
+FROM python:3.9
 
-# Install FFmpeg and other dependencies
-RUN apt-get update && \
-    apt-get install -y wget && \
-    wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz && \
-    tar xvf ffmpeg-release-amd64-static.tar.xz && \
-    mv ffmpeg*/ffmpeg ffmpeg*/ffprobe /usr/local/bin/ && \
-    chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Set the working directory
+# Set working directory
 WORKDIR /app
 
-# Copy files
-COPY . /app
+# Install FFmpeg dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt /app/
+RUN pip3 install -r requirements.txt
 
-# Expose the port
-EXPOSE 80
+# Copy the rest of the bot's files into the container
+COPY . /app
+
+# Set the environment variable for the FFmpeg binary
+ENV PATH="/app/ffmpeg:${PATH}"
+
+# Ensure FFmpeg has executable permissions (if it's bundled with your app)
+RUN chmod +x /app/ffmpeg/ffmpeg
 
 # Run the bot
-CMD ["python", "main.py"]
+CMD ["python3", "main.py"]
