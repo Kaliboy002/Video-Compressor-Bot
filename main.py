@@ -6,7 +6,7 @@ from queue import Queue
 from pyrogram import Client, filters
 import pyrogram
 
-# Configure logging
+# Configure loggingg
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
