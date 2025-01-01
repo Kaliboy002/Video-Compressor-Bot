@@ -1,4 +1,4 @@
 requests
-pyrogram==2.0.36
-tgcrypto==1.2.0
-python-dotenv==0.21.1
+pyrogram
+tgcrypto
+python-dotenv
