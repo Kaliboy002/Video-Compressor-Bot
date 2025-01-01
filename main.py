@@ -53,7 +53,7 @@ def progress(current, total, message, type):
     with open(f'{message.id}{type}status.txt', "w") as fileup:
         fileup.write(f"{current * 100 / total:.1f}%")
 
-# Compression function
+# Compression function with enhanced error handling
 def compress(message, msg):
     dowsta = threading.Thread(target=lambda: downstatus(f'{message.id}downstatus.txt', msg), daemon=True)
     dowsta.start()
@@ -72,19 +72,28 @@ def compress(message, msg):
 
     app.edit_message_text(message.chat.id, msg.id, "__Compressing__")
     try:
-        os.system(cmd)
+        # Log the output and error to a file
+        ffmpeg_log = f'/tmp/ffmpeg_log_{message.id}.txt'
+        os.system(f"{cmd} > {ffmpeg_log} 2>&1")
+        
+        # Check the FFmpeg log for any errors
+        with open(ffmpeg_log, 'r') as log_file:
+            log_content = log_file.read()
+            if "Error" in log_content or "Invalid" in log_content:
+                app.edit_message_text(message.chat.id, msg.id, f"**Error during compression**: {log_content}")
+                return
     except Exception as e:
         app.edit_message_text(message.chat.id, msg.id, f"**Error**: {e}")
         return
 
-    file_exists = os.path.exists(f'output-{message.id}.mp4')
-    if file_exists:
-        os.remove(vfile)
+    # Validate that the compressed file exists and has non-zero size
+    if os.path.exists(f'output-{message.id}.mp4') and os.path.getsize(f'output-{message.id}.mp4') > 0:
+        os.remove(vfile)  # Remove original video file
+        os.rename(f'output-{message.id}.mp4', name)  # Rename compressed file
     else:
-        app.edit_message_text(message.chat.id, msg.id, "**Error during compression**")
+        app.edit_message_text(message.chat.id, msg.id, "**Compression failed or output is empty.**")
         return
 
-    os.rename(f'output-{message.id}.mp4', name)
     app.edit_message_text(message.chat.id, msg.id, "__Uploading__")
     
     upsta = threading.Thread(target=lambda: upstatus(f'{message.id}upstatus.txt', msg), daemon=True)
