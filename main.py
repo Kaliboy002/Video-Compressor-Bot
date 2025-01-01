@@ -2,31 +2,38 @@ import os
 import threading
 import time
 from pyrogram import Client, filters
-import pyrogram
+from pyrogram.types import Message
+import subprocess
 
-# Setup
-bot_token = os.environ.get("TOKEN", "") 
-api_hash = os.environ.get("HASH", "") 
-api_id = os.environ.get("ID", "") 
+# Bot Setup
+bot_token = os.environ.get("TOKEN", "")
+api_hash = os.environ.get("HASH", "")
+api_id = os.environ.get("ID", "")
 app = Client("video_compressor_bot", api_id=api_id, api_hash=api_hash, bot_token=bot_token)
 
 # Ensure ffmpeg permissions
 os.system("chmod +x ./ffmpeg/ffmpeg")
 
 # Start Command
-@app.on_message(filters.command(['start']))
-def start_command(client, message: pyrogram.types.messages_and_media.message.Message):
+@app.on_message(filters.command(["start"]))
+def start_command(client, message: Message):
     app.send_message(
         message.chat.id,
-        f"**Welcome** {message.from_user.mention}\n"
-        f"__Send me a video file, and I'll compress it for you.__"
+        f"**Welcome, {message.from_user.mention}!**\n"
+        f"__Send me a video file, and I'll compress it for you.__\n"
+        f"**Note:** This bot works best for videos up to ~2GB (Railway limitations apply)."
     )
 
-# Status Updater
+# Progress Writer
+def progress_callback(current, total, message, stage):
+    progress = f"{(current / total) * 100:.1f}%"
+    with open(f"{message.id}_{stage}_progress.txt", "w") as f:
+        f.write(progress)
+
+# Status Update Thread
 def update_status(file_path, message, prefix):
     while not os.path.exists(file_path):
         time.sleep(1)
-
     while os.path.exists(file_path):
         try:
             with open(file_path, "r") as f:
@@ -34,56 +41,58 @@ def update_status(file_path, message, prefix):
             app.edit_message_text(message.chat.id, message.id, f"{prefix}: **{progress}**")
         except:
             pass
-        time.sleep(3)
-
-# Progress Writer
-def progress_callback(current, total, message, stage):
-    progress = f"{current * 100 / total:.1f}%"
-    with open(f"{message.id}_{stage}.txt", "w") as f:
-        f.write(progress)
+        time.sleep(5)
 
 # Compress Video
 def compress_video(message, status_msg):
     try:
-        # Downloading
-        download_status_file = f"{message.id}_download.txt"
+        # Downloading Video
+        download_progress_file = f"{message.id}_download_progress.txt"
         download_thread = threading.Thread(
-            target=update_status, args=(download_status_file, status_msg, "Downloading"), daemon=True
+            target=update_status, args=(download_progress_file, status_msg, "Downloading"), daemon=True
         )
         download_thread.start()
 
-        video_file = app.download_media(
+        input_file = app.download_media(
             message,
             progress=progress_callback,
             progress_args=[message, "download"]
         )
-
-        if os.path.exists(download_status_file):
-            os.remove(download_status_file)
-
-        if not video_file:
+        if not input_file:
             app.edit_message_text(message.chat.id, status_msg.id, "❌ Failed to download the video.")
             return
 
-        # Compressing
+        # Remove Download Progress File
+        if os.path.exists(download_progress_file):
+            os.remove(download_progress_file)
+
+        # Compressing Video
         app.edit_message_text(message.chat.id, status_msg.id, "⚙️ Compressing the video...")
-
         output_file = f"compressed-{message.id}.mp4"
-        ffmpeg_command = f"./ffmpeg/ffmpeg -i {video_file} -c:v libx265 -preset medium -crf 28 -c:a aac {output_file} -y"
 
-        compression_status = os.system(ffmpeg_command)
+        # Adjusted for older FFmpeg versions
+        ffmpeg_command = [
+            "./ffmpeg/ffmpeg",
+            "-i", input_file,
+            "-c:v", "libx264",  # libx264 for compatibility
+            "-preset", "medium",  # Standard preset
+            "-crf", "28",  # Compression level
+            "-c:a", "aac",  # Audio codec
+            output_file
+        ]
 
-        if compression_status != 0 or not os.path.exists(output_file):
+        process = subprocess.run(ffmpeg_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if process.returncode != 0 or not os.path.exists(output_file):
             app.edit_message_text(message.chat.id, status_msg.id, "❌ Compression failed.")
             return
 
-        # Cleanup original file
-        os.remove(video_file)
+        # Remove Original File to Save Space
+        os.remove(input_file)
 
-        # Uploading
-        upload_status_file = f"{message.id}_upload.txt"
+        # Uploading Video
+        upload_progress_file = f"{message.id}_upload_progress.txt"
         upload_thread = threading.Thread(
-            target=update_status, args=(upload_status_file, status_msg, "Uploading"), daemon=True
+            target=update_status, args=(upload_progress_file, status_msg, "Uploading"), daemon=True
         )
         upload_thread.start()
 
@@ -96,23 +105,23 @@ def compress_video(message, status_msg):
             reply_to_message_id=message.id
         )
 
-        if os.path.exists(upload_status_file):
-            os.remove(upload_status_file)
-
-        # Cleanup compressed file
+        # Cleanup
+        if os.path.exists(upload_progress_file):
+            os.remove(upload_progress_file)
         os.remove(output_file)
+
         app.delete_messages(message.chat.id, [status_msg.id])
 
     except Exception as e:
         app.edit_message_text(message.chat.id, status_msg.id, f"❌ Error: {str(e)}")
         return
 
-# Handle Document
+# Document Handler
 @app.on_message(filters.document)
-def handle_document(client, message):
+def handle_document(client, message: Message):
     try:
-        mimetype = message.document.mime_type
-        if "video" in mimetype:
+        mime_type = message.document.mime_type
+        if "video" in mime_type:
             status_msg = app.send_message(message.chat.id, "📥 Downloading...", reply_to_message_id=message.id)
             threading.Thread(target=compress_video, args=(message, status_msg), daemon=True).start()
         else:
@@ -120,14 +129,14 @@ def handle_document(client, message):
     except Exception as e:
         app.send_message(message.chat.id, f"❌ Error: {str(e)}")
 
-# Handle Video
+# Video Handler
 @app.on_message(filters.video)
-def handle_video(client, message):
+def handle_video(client, message: Message):
     try:
         status_msg = app.send_message(message.chat.id, "📥 Downloading...", reply_to_message_id=message.id)
         threading.Thread(target=compress_video, args=(message, status_msg), daemon=True).start()
     except Exception as e:
         app.send_message(message.chat.id, f"❌ Error: {str(e)}")
 
-# Run the bot
+# Run the Bot
 app.run()
