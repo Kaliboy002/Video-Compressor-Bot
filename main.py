@@ -4,6 +4,7 @@ import time
 from pyrogram import Client, filters
 from pyrogram.types import Message
 import subprocess
+import shutil
 
 # Bot Setup
 bot_token = os.environ.get("TOKEN", "")
@@ -20,8 +21,11 @@ def start_command(client, message: Message):
     app.send_message(
         message.chat.id,
         f"**Welcome, {message.from_user.mention}!**\n"
-        f"__Send me a video file, and I'll compress it for you.__\n"
-        f"**Note:** This bot works best for videos up to ~2GB (Railway limitations apply)."
+        f"__Send me a video file, and I'll compress it for you.__\n\n"
+        f"**Key Features:**\n"
+        f"1. Handles videos up to 1GB (depending on system).\n"
+        f"2. Maintains good video quality during compression.\n"
+        f"3. Compatible with older FFmpeg versions."
     )
 
 # Progress Writer
@@ -75,15 +79,16 @@ def compress_video(message, status_msg):
             "./ffmpeg/ffmpeg",
             "-i", input_file,
             "-c:v", "libx264",  # libx264 for compatibility
-            "-preset", "medium",  # Standard preset
+            "-preset", "slow",  # Better compression
             "-crf", "28",  # Compression level
             "-c:a", "aac",  # Audio codec
+            "-movflags", "+faststart",  # Optimize for streaming
             output_file
         ]
 
         process = subprocess.run(ffmpeg_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if process.returncode != 0 or not os.path.exists(output_file):
-            app.edit_message_text(message.chat.id, status_msg.id, "❌ Compression failed.")
+            app.edit_message_text(message.chat.id, status_msg.id, "❌ Compression failed. Check FFmpeg logs.")
             return
 
         # Remove Original File to Save Space
@@ -99,7 +104,7 @@ def compress_video(message, status_msg):
         app.send_document(
             message.chat.id,
             document=output_file,
-            caption="✅ Video compressed successfully!",
+            caption="✅ Video compressed successfully! (Optimized for size and quality)",
             progress=progress_callback,
             progress_args=[message, "upload"],
             reply_to_message_id=message.id
