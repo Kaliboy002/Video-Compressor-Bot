@@ -9,11 +9,11 @@ bot_token = os.environ.get("TOKEN", "")
 api_hash = os.environ.get("HASH", "") 
 api_id = os.environ.get("ID", "") 
 app = Client("my_bot", api_id=api_id, api_hash=api_hash, bot_token=bot_token)
-os.system("chmod 777 ./ffmpeg/ffmpeg")
+os.system("chmod 777 ./ffmpeg/ffmpeg")  # Ensure ffmpeg has execute permission
 
 # Start command
 @app.on_message(filters.command(['start']))
-def echo(client, message: pyrogram.types.messages_and_media.message.Message):
+def echo(client, message : pyrogram.types.messages_and_media.message.Message):
     app.send_message(message.chat.id, f"**Welcome** {message.from_user.mention}\n__Just send me a video file to compress.__")
 
 # Upload status
@@ -63,6 +63,12 @@ def compress(message, msg):
         os.remove(f'{message.id}downstatus.txt')
 
     name = vfile.split("/")[-1]
+    
+    # Check if the downloaded video file is valid and not empty
+    if os.path.getsize(vfile) == 0:
+        app.edit_message_text(message.chat.id, msg.id, "**Error**: Downloaded file is empty.")
+        return
+
     video_size = os.path.getsize(vfile) / (1024 * 1024)  # Size in MB
     # Dynamically set compression ratio for larger files
     if video_size < 50:
@@ -71,20 +77,17 @@ def compress(message, msg):
         cmd = f'./ffmpeg/ffmpeg -i "{vfile}" -c:v libx265 -crf 28 -preset veryfast output-{message.id}.mp4'
 
     app.edit_message_text(message.chat.id, msg.id, "__Compressing__")
-    try:
-        # Log the output and error to a file
-        ffmpeg_log = f'/tmp/ffmpeg_log_{message.id}.txt'
-        os.system(f"{cmd} > {ffmpeg_log} 2>&1")
-        
-        # Check the FFmpeg log for any errors
-        with open(ffmpeg_log, 'r') as log_file:
-            log_content = log_file.read()
-            if "Error" in log_content or "Invalid" in log_content:
-                app.edit_message_text(message.chat.id, msg.id, f"**Error during compression**: {log_content}")
-                return
-    except Exception as e:
-        app.edit_message_text(message.chat.id, msg.id, f"**Error**: {e}")
-        return
+
+    # Log FFmpeg output (stdout and stderr) to help diagnose the issue
+    ffmpeg_log = f'/tmp/ffmpeg_log_{message.id}.txt'
+    os.system(f"{cmd} > {ffmpeg_log} 2>&1")
+
+    # Check the FFmpeg log for errors
+    with open(ffmpeg_log, 'r') as log_file:
+        log_content = log_file.read()
+        if "Error" in log_content or "Invalid" in log_content:
+            app.edit_message_text(message.chat.id, msg.id, f"**Error during compression**: {log_content}")
+            return
 
     # Validate that the compressed file exists and has non-zero size
     if os.path.exists(f'output-{message.id}.mp4') and os.path.getsize(f'output-{message.id}.mp4') > 0:
@@ -95,10 +98,10 @@ def compress(message, msg):
         return
 
     app.edit_message_text(message.chat.id, msg.id, "__Uploading__")
-    
+
     upsta = threading.Thread(target=lambda: upstatus(f'{message.id}upstatus.txt', msg), daemon=True)
     upsta.start()
-    
+
     try:
         app.send_document(
             message.chat.id,
